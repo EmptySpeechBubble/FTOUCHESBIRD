@@ -3709,9 +3709,9 @@ wasRaining = true; // Set flag when rain just stopped
 rainsCompleted++;
 debugLog(`Rain event completed. Total rains: ${rainsCompleted}`);
 
-// FIX: Pond generation when it rains frequently
-// 25% chance after 5+ rains (increased from 10% after 8), and only if no pond exists yet
-if (rainsCompleted >= 5 && ponds.length === 0 && Math.random() < 0.25) {
+// FIX: Pond generation after many rains
+// 10% chance on every rain after 10 rains, and only if no pond exists yet
+if (rainsCompleted >= 10 && ponds.length === 0 && Math.random() < 0.10) {
     const pondX = 100 + Math.random() * (canvas.width - 200);
     const pondWidth = 100 + Math.random() * 60;
     const pondHeight = 50 + Math.random() * 30;
@@ -20874,9 +20874,9 @@ for (let i = owls.length - 1; i >= 0; i--) {
         debugLog("MEMORY: Fireflies array capped at 100", DEBUG_LEVELS.WARNING);
     }
 
-    // Clean up old food (prevent accumulation)
-    if (foodItems.length > 200) {
-        foodItems = foodItems.filter(f => now - f.spawnTime < 60000).slice(0, 200);
+    // Clean up old food (prevent accumulation) - relaxed cleanup
+    if (foodItems.length > 300) {
+        foodItems = foodItems.filter(f => now - f.spawnTime < 120000).slice(0, 300);
         debugLog("MEMORY: Food array cleaned and capped", DEBUG_LEVELS.WARNING);
     }
 
@@ -20892,9 +20892,9 @@ for (let i = owls.length - 1; i >= 0; i--) {
         debugLog("MEMORY: Puddles array capped", DEBUG_LEVELS.WARNING);
     }
 
-    // Clean up old worms (updated threshold to match MAX_WORMS)
-    if (worms.length > 60) {
-        worms = worms.slice(0, 60);
+    // Clean up old worms - relaxed cleanup (allow more worms for crows)
+    if (worms.length > 80) {
+        worms = worms.slice(0, 80);
         debugLog("MEMORY: Worms array capped", DEBUG_LEVELS.WARNING);
     }
 
@@ -20955,34 +20955,36 @@ for (let i = owls.length - 1; i >= 0; i--) {
         debugLog("MEMORY: Owls array capped", DEBUG_LEVELS.WARNING);
     }
 
-    // ENHANCED: Clean up fully degraded nests to prevent accumulation
-    if (nests.length > 15) {
-        // Remove nests with very low condition and no materials
+    // ENHANCED: Clean up fully degraded nests to prevent accumulation - relaxed cleanup
+    if (nests.length > 25) {
+        // Only remove completely destroyed nests (condition 0 AND no materials)
         nests = nests.filter(nest => nest.condition > 0 || nest.materialsCollected > 0);
-        if (nests.length > 15) {
-            // Still too many? Remove oldest incomplete nests
+        if (nests.length > 25) {
+            // Still too many? Remove oldest incomplete nests with low condition
             const incompleteSortedByAge = nests
-                .filter(n => !n.isComplete)
+                .filter(n => !n.isComplete && n.condition < 10)
                 .sort((a, b) => (b.lastMaintenanceTime || 0) - (a.lastMaintenanceTime || 0));
-            const toRemove = Math.min(incompleteSortedByAge.length, nests.length - 15);
+            const toRemove = Math.min(incompleteSortedByAge.length, nests.length - 25);
             incompleteSortedByAge.slice(0, toRemove).forEach(nest => {
                 const idx = nests.indexOf(nest);
                 if (idx !== -1) nests.splice(idx, 1);
             });
-            debugLog(`MEMORY: Cleaned ${toRemove} old degraded nests`, DEBUG_LEVELS.WARNING);
+            if (toRemove > 0) {
+                debugLog(`MEMORY: Cleaned ${toRemove} destroyed nests`, DEBUG_LEVELS.WARNING);
+            }
         }
     }
 
-    // ENHANCED: Clean up orphaned baby birds (parent died or flew away)
-    if (babyBirds.length > 20) {
-        // Remove oldest baby birds that have been around too long
+    // ENHANCED: Clean up orphaned baby birds (parent died or flew away) - relaxed cleanup
+    if (babyBirds.length > 30) {
+        // Remove oldest baby birds that have been around too long (only if really excessive)
         const now = Date.now();
         babyBirds = babyBirds.filter(baby => {
             if (!baby.birthTime) baby.birthTime = now; // Fallback for old babies
-            return (now - baby.birthTime) < 600000; // 10 minutes max lifespan
+            return (now - baby.birthTime) < 4500000; // 75 minutes max lifespan (relaxed from 10min)
         });
-        if (babyBirds.length > 20) {
-            babyBirds = babyBirds.slice(0, 20);
+        if (babyBirds.length > 30) {
+            babyBirds = babyBirds.slice(0, 30);
         }
         debugLog("MEMORY: Baby birds cleaned", DEBUG_LEVELS.WARNING);
     }
@@ -21514,8 +21516,8 @@ function drawFullScene() {
                 });
             }
 
-            // 20% chance to spawn a pond on initial load (increased for more bathing/drinking)
-            if (Math.random() < 0.2) {
+            // 10% chance to spawn a pond on initial load
+            if (Math.random() < 0.1) {
                 const pondWidth = 80 + Math.random() * 40;
                 const pondHeight = 50 + Math.random() * 30;
                 const pondX = 100 + Math.random() * (canvas.width - 200);
