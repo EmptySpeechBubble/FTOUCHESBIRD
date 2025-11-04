@@ -1613,6 +1613,10 @@ let crowVisitTimer = 0;
 const CROW_VISIT_DURATION = 60000; // 1 minute crow visit
 const CROW_WORM_THRESHOLD = 30; // Spawn crows when worms exceed this number
 const MAX_CROWS = 7; // Size of a murder of crows
+let crowLastVisitDay = -10; // Track last crow visit (start at -10 so first visit can happen early)
+const CROW_VISIT_INTERVAL_MIN = 5; // Minimum days between crow visits
+const CROW_VISIT_INTERVAL_MAX = 7; // Maximum days between crow visits
+let crowNextVisitDay = CROW_VISIT_INTERVAL_MIN + Math.floor(Math.random() * (CROW_VISIT_INTERVAL_MAX - CROW_VISIT_INTERVAL_MIN + 1)); // Schedule first visit
 let antHill = null;
 let ants = [];
 
@@ -1985,7 +1989,7 @@ let rainsCompleted = 0; // Track number of completed rain events (for pond forma
         const MIN_STATE_DURATION = 3000; // Minimum 3 seconds to prevent rapid toggling (BIRD_STATE_DURATION handles visibility)
         const MAX_BIRD_POOPS = 10;
         const MAX_PUDDLES = 13; // Limit puddles for performance
-        const MAX_WORMS = 30; // REDUCED from 45 - encourage consumption
+        const MAX_WORMS = 50; // INCREASED to allow exceeding crow threshold of 30
         const MAX_TWIGS = 15; // REDUCED from 20 - encourage consumption
         const MAX_NEST_FIND_ATTEMPTS = 20; 
         const NEST_MATERIALS_NEEDED = 4;
@@ -3705,9 +3709,9 @@ wasRaining = true; // Set flag when rain just stopped
 rainsCompleted++;
 debugLog(`Rain event completed. Total rains: ${rainsCompleted}`);
 
-// FIX: VERY RARE pond generation when it rains too much
-// Only 10% chance after 8+ rains, and only if no pond exists yet
-if (rainsCompleted >= 8 && ponds.length === 0 && Math.random() < 0.10) {
+// FIX: Pond generation when it rains frequently
+// 25% chance after 5+ rains (increased from 10% after 8), and only if no pond exists yet
+if (rainsCompleted >= 5 && ponds.length === 0 && Math.random() < 0.25) {
     const pondX = 100 + Math.random() * (canvas.width - 200);
     const pondWidth = 100 + Math.random() * 60;
     const pondHeight = 50 + Math.random() * 30;
@@ -3978,8 +3982,8 @@ if (trees.length > 0 && Math.random() < 0.15) {
                 puddles.splice(0, puddles.length - MAX_PUDDLES + 3); // Keep some room for new ones
             }
             
-            // Create 3-7 puddles after rain
-            const puddleCount = Math.floor(3 + Math.random() * 5);
+            // Create 4-9 puddles after rain (increased for more bathing opportunities)
+            const puddleCount = Math.floor(4 + Math.random() * 6);
             for (let i = 0; i < puddleCount; i++) {
                 // Distribute across ground (positioned below ground line)
                 const puddleX = Math.random() * canvas.width;
@@ -5766,8 +5770,14 @@ currentHour = Math.floor(((timeOfDay < 1 ? timeOfDay * 12 : 12 + (timeOfDay - 1)
             }
 
             addMaterial() {
+                // FIX: Cap materials at needed amount to prevent over 100% progress
+                if (this.materialsCollected >= NEST_MATERIALS_NEEDED) {
+                    debugLog(`Nest already complete - cannot add more materials`);
+                    return false; // Return false to indicate material wasn't added
+                }
+
                 this.materialsCollected++;
-                
+
                 if (this.materialsCollected >= NEST_MATERIALS_NEEDED && !this.isComplete) {
                     this.isComplete = true;
                     this.readyForBabies = true;
@@ -15446,7 +15456,7 @@ class Crow {
     }
 }
 
-// Function to check if we should spawn crows
+// Function to check if we should spawn crows - UPDATED with predictable schedule
 function checkForCrowVisit(deltaTime) {
     // Update timer if visit is in progress
     if (crowVisitInProgress) {
@@ -15458,7 +15468,10 @@ function checkForCrowVisit(deltaTime) {
             makeCrowsLeave();
             crowVisitInProgress = false;
             crowVisitTimer = 0;
-            debugLog("Murder of crows leaving");
+            crowLastVisitDay = dayNightCycleCount; // Record when they left
+            // Schedule next visit in 5-7 days
+            crowNextVisitDay = dayNightCycleCount + CROW_VISIT_INTERVAL_MIN + Math.floor(Math.random() * (CROW_VISIT_INTERVAL_MAX - CROW_VISIT_INTERVAL_MIN + 1));
+            debugLog(`Murder of crows leaving. Next visit scheduled for day ${crowNextVisitDay}`);
         }
         return;
     }
@@ -15468,16 +15481,20 @@ function checkForCrowVisit(deltaTime) {
         return;
     }
 
-    // More random crow spawning - varies by worm count
-    // The more worms, the higher the spawn chance, but it's still random
-    const wormExcessFactor = Math.max(0, (worms.length - CROW_WORM_THRESHOLD) / 10);
-    const baseSpawnChance = 0.0005; // Lower base chance (0.05% per frame)
-    const wormBonusChance = wormExcessFactor * 0.0003; // Bonus increases with worm count
-    const totalChance = Math.min(baseSpawnChance + wormBonusChance, 0.003); // Cap at 0.3%
+    // PREDICTABLE SCHEDULE: Check if it's time for a crow visit
+    if (worms.length >= CROW_WORM_THRESHOLD && dayNightCycleCount >= crowNextVisitDay) {
+        // It's time! Spawn crows
+        debugLog(`Scheduled crow visit on day ${dayNightCycleCount} (worms: ${worms.length})`);
+        spawnMurderOfCrows();
+        return;
+    }
 
-    if (Math.random() < totalChance && worms.length >= CROW_WORM_THRESHOLD) {
-        // Additional random roll to make it even more unpredictable
-        if (Math.random() < 0.15) { // 15% chance after first roll
+    // BACKUP RANDOM SPAWN: If worm population is critically high (40+), crows may come early
+    if (worms.length >= 40 && dayNightCycleCount >= (crowLastVisitDay + 2)) {
+        // Small chance for emergency visit if too many worms
+        const emergencyChance = (worms.length - 40) * 0.0002; // 0.02% per extra worm
+        if (Math.random() < emergencyChance) {
+            debugLog(`Emergency crow visit due to high worm population (${worms.length} worms)`);
             spawnMurderOfCrows();
         }
     }
@@ -18389,10 +18406,17 @@ function spawnOwls() {
         }
 
         // V26: Improved wind chime system with more balanced volume and timing
+        // ENHANCED: Better error handling and recovery
         function initializeAudio() {
             try {
+                // Check if audio context already exists and is usable
+                if (audioContext && audioContext.state !== 'closed') {
+                    debugLog("Audio context already initialized");
+                    return true;
+                }
+
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
+
                 // Define wind chime frequencies based on pentatonic scale - OCTAVE HIGHER for brighter sound
                 windChimeSounds = {
                     'C': 523.25, // C5 (was C4 261.63)
@@ -18401,12 +18425,42 @@ function spawnOwls() {
                     'G': 783.99, // G5 (was G4 392.00)
                     'A': 880.00  // A5 (was A4 440.00)
                 };
-                
-                debugLog("Audio context initialized");
+
+                // Resume audio context if suspended (browser autoplay policy)
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => {
+                        debugLog("Audio context resumed after suspension");
+                    }).catch(err => {
+                        console.error("Failed to resume audio context:", err);
+                        return false;
+                    });
+                }
+
+                debugLog("Audio context initialized successfully");
+                return true;
             } catch (e) {
                 console.error("Error initializing audio:", e);
                 windChimeEnabled = false;
+                audioContext = null;
+                return false;
             }
+        }
+
+        // ENHANCED: Audio recovery mechanism
+        function recoverAudioContext() {
+            if (!audioContext || audioContext.state === 'closed') {
+                debugLog("Attempting to recover audio context...");
+                audioContext = null;
+                windChimeSounds = {};
+                return initializeAudio();
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().catch(err => {
+                    console.error("Failed to resume audio in recovery:", err);
+                    return false;
+                });
+            }
+            return true;
         }
 
         // V26: Wind chime playback with reduced volume
@@ -19071,7 +19125,21 @@ function spawnOwls() {
         }
 
         function playNote(note, duration = 4) {
-            if (!audioContext) return;
+            // ENHANCED: Try to recover audio context if it's not available
+            if (!audioContext) {
+                if (!recoverAudioContext()) {
+                    debugLog("Audio context unavailable and recovery failed");
+                    return;
+                }
+            }
+
+            // Check if audio context is in a usable state
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().catch(err => {
+                    console.error("Failed to resume audio context in playNote:", err);
+                });
+                return; // Skip this note, try again next time
+            }
 
             // CRITICAL: Safety check - ensure windChimeSounds exists and note is valid
             if (!windChimeSounds || !windChimeSounds[note]) {
@@ -19137,6 +19205,11 @@ function spawnOwls() {
                 harmonicOscillators.forEach(h => h.osc.stop(audioContext.currentTime + duration));
             } catch (e) {
                 console.error("Error playing note:", e);
+                // ENHANCED: Attempt recovery if audio context failed
+                if (e.message && (e.message.includes('AudioContext') || e.message.includes('destination'))) {
+                    debugLog("Audio context error detected, attempting recovery...");
+                    recoverAudioContext();
+                }
             }
         }
 
@@ -20819,9 +20892,9 @@ for (let i = owls.length - 1; i >= 0; i--) {
         debugLog("MEMORY: Puddles array capped", DEBUG_LEVELS.WARNING);
     }
 
-    // Clean up old worms
-    if (worms.length > 100) {
-        worms = worms.slice(0, 100);
+    // Clean up old worms (updated threshold to match MAX_WORMS)
+    if (worms.length > 60) {
+        worms = worms.slice(0, 60);
         debugLog("MEMORY: Worms array capped", DEBUG_LEVELS.WARNING);
     }
 
@@ -20880,6 +20953,38 @@ for (let i = owls.length - 1; i >= 0; i--) {
     if (owls.length > 10) {
         owls = owls.slice(0, 10);
         debugLog("MEMORY: Owls array capped", DEBUG_LEVELS.WARNING);
+    }
+
+    // ENHANCED: Clean up fully degraded nests to prevent accumulation
+    if (nests.length > 15) {
+        // Remove nests with very low condition and no materials
+        nests = nests.filter(nest => nest.condition > 0 || nest.materialsCollected > 0);
+        if (nests.length > 15) {
+            // Still too many? Remove oldest incomplete nests
+            const incompleteSortedByAge = nests
+                .filter(n => !n.isComplete)
+                .sort((a, b) => (b.lastMaintenanceTime || 0) - (a.lastMaintenanceTime || 0));
+            const toRemove = Math.min(incompleteSortedByAge.length, nests.length - 15);
+            incompleteSortedByAge.slice(0, toRemove).forEach(nest => {
+                const idx = nests.indexOf(nest);
+                if (idx !== -1) nests.splice(idx, 1);
+            });
+            debugLog(`MEMORY: Cleaned ${toRemove} old degraded nests`, DEBUG_LEVELS.WARNING);
+        }
+    }
+
+    // ENHANCED: Clean up orphaned baby birds (parent died or flew away)
+    if (babyBirds.length > 20) {
+        // Remove oldest baby birds that have been around too long
+        const now = Date.now();
+        babyBirds = babyBirds.filter(baby => {
+            if (!baby.birthTime) baby.birthTime = now; // Fallback for old babies
+            return (now - baby.birthTime) < 600000; // 10 minutes max lifespan
+        });
+        if (babyBirds.length > 20) {
+            babyBirds = babyBirds.slice(0, 20);
+        }
+        debugLog("MEMORY: Baby birds cleaned", DEBUG_LEVELS.WARNING);
     }
 
     if (simulationTime % GUARANTEED_TREE_CHECK_RATE < 16) {
@@ -21409,8 +21514,8 @@ function drawFullScene() {
                 });
             }
 
-            // 10% chance to spawn a pond on initial load
-            if (Math.random() < 0.1) {
+            // 20% chance to spawn a pond on initial load (increased for more bathing/drinking)
+            if (Math.random() < 0.2) {
                 const pondWidth = 80 + Math.random() * 40;
                 const pondHeight = 50 + Math.random() * 30;
                 const pondX = 100 + Math.random() * (canvas.width - 200);
